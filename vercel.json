@@ -1,0 +1,7 @@
+{
+  "version": 2,
+  "name": "dashboard-contadores",
+  "framework": "nextjs",
+  "buildCommand": "next build",
+  "outputDirectory": ".next"
+}
