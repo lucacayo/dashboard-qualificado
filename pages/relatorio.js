@@ -189,7 +189,7 @@ export default function Relatorio() {
   // Dados período A
   const range = data ? buildRange(data.inicio, data.fim) : [];
   const chartData = range.map((key) => {
-    const row = { label: labelDia(key), _key: key };
+    const row = { label: labelDia(key), labelSemana: `${labelDia(key)} ${diaSemana(key)}`, _key: key };
     COUNTERS.forEach((c) => {
       const found = data?.series?.find((s) => s.counter_id === c.id && s.dia === key);
       row[c.id] = found ? Number(found.total) : 0;
@@ -431,7 +431,7 @@ export default function Relatorio() {
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} vertical={false} />
-                        <XAxis dataKey="label" tick={{ fill: tickFill, fontSize: 11, fontFamily: 'DM Mono' }} axisLine={false} tickLine={false} interval={xInterval} />
+                        <XAxis dataKey="labelSemana" tick={{ fill: tickFill, fontSize: 11, fontFamily: 'DM Mono' }} axisLine={false} tickLine={false} interval={xInterval} />
                         <YAxis tick={{ fill: tickFill, fontSize: 11, fontFamily: 'DM Mono' }} axisLine={false} tickLine={false} allowDecimals={false} width={30} />
                         <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} />
                         {!selected && <Legend wrapperStyle={{ fontSize: 11, fontFamily: 'DM Mono', paddingTop: 12 }} />}
