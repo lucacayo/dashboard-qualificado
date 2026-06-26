@@ -83,6 +83,9 @@ function buildRange(inicio, fim) {
 const labelDia = (key) =>
   new Date(key + 'T00:00:00Z').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'UTC' });
 
+const diaSemana = (key) =>
+  new Date(key + 'T00:00:00Z').toLocaleDateString('pt-BR', { weekday: 'long', timeZone: 'UTC' });
+
 function delta(a, b) {
   if (a === 0 && b === 0) return null;
   if (a === 0) return { pct: null, label: 'novo', up: true };
@@ -464,7 +467,10 @@ export default function Relatorio() {
                         .filter((r) => selected ? r[selected] > 0 : r._total > 0)
                         .map((r) => (
                           <tr key={r._key}>
-                            <td className="td-dia">{r.label}</td>
+                            <td className="td-dia">
+                              {r.label}
+                              <span className="td-weekday">{diaSemana(r._key)}</span>
+                            </td>
                             {visibleCounters.map((c) => <td key={c.id}>{r[c.id] || '·'}</td>)}
                             {!selected && <td className="td-total">{r._total}</td>}
                           </tr>
@@ -602,7 +608,8 @@ export default function Relatorio() {
           th { text-align: right; padding: 8px 10px; color: var(--text-muted); font-weight: 500; border-bottom: 1px solid var(--border-strong); white-space: nowrap; }
           th:first-child { text-align: left; }
           td { text-align: right; padding: 7px 10px; color: var(--text-sub); border-bottom: 1px solid var(--border); }
-          .td-dia { text-align: left; color: var(--text-muted); }
+          .td-dia { text-align: left; color: var(--text-muted); white-space: nowrap; }
+          .td-weekday { margin-left: 8px; color: var(--text-dim); font-size: 11px; }
           .td-total { color: var(--text); font-weight: 700; }
           tfoot td { border-top: 1px solid var(--border-strong); border-bottom: none; color: var(--text); font-weight: 700; padding-top: 10px; }
 
