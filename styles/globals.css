@@ -23,6 +23,7 @@
   --nav-hover: #1c1c1c;
   --input-bg: #111111;
   --shadow: none;
+  --weekend-bg: rgba(255,255,255,0.045);
 }
 
 /* ===== Tema claro ===== */
@@ -47,6 +48,7 @@
   --nav-hover: #f2f2f0;
   --input-bg: #ededeb;
   --shadow: 0 1px 3px rgba(0,0,0,0.06);
+  --weekend-bg: rgba(0,0,0,0.045);
 }
 
 /* ===== Base ===== */

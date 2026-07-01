@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   LineChart, Line, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Legend
+  ResponsiveContainer, Legend, ReferenceArea
 } from 'recharts';
 import Head from 'next/head';
 import Layout from '../components/Layout';
@@ -85,6 +85,11 @@ const labelDia = (key) =>
 
 const diaSemana = (key) =>
   new Date(key + 'T00:00:00Z').toLocaleDateString('pt-BR', { weekday: 'long', timeZone: 'UTC' });
+
+const isWeekendKey = (key) => {
+  const day = new Date(key + 'T00:00:00Z').getUTCDay();
+  return day === 0 || day === 6;
+};
 
 function delta(a, b) {
   if (a === 0 && b === 0) return null;
@@ -189,7 +194,7 @@ export default function Relatorio() {
   // Dados período A
   const range = data ? buildRange(data.inicio, data.fim) : [];
   const chartData = range.map((key) => {
-    const row = { label: labelDia(key), labelSemana: `${labelDia(key)} ${diaSemana(key)}`, _key: key };
+    const row = { label: labelDia(key), labelSemana: `${labelDia(key)} ${diaSemana(key)}`, _key: key, _weekend: isWeekendKey(key) };
     COUNTERS.forEach((c) => {
       const found = data?.series?.find((s) => s.counter_id === c.id && s.dia === key);
       row[c.id] = found ? Number(found.total) : 0;
@@ -222,6 +227,7 @@ export default function Relatorio() {
   const tooltipItemStyle = { color: isDark ? '#fff' : '#1a1a1a' };
   const gridStroke = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
   const tickFill = isDark ? '#888' : '#999';
+  const weekendFill = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.045)';
 
   const labelA = data ? `${labelDia(data.inicio)} – ${labelDia(data.fim)}` : 'Período A';
   const labelB = dataB ? `${labelDia(dataB.inicio)} – ${labelDia(dataB.fim)}` : 'Período B';
@@ -431,7 +437,10 @@ export default function Relatorio() {
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} vertical={false} />
-                        <XAxis dataKey="labelSemana" tick={{ fill: tickFill, fontSize: 11, fontFamily: 'DM Mono' }} axisLine={false} tickLine={false} interval={xInterval} />
+                        {chartData.filter(d => d._weekend).map(d => (
+                          <ReferenceArea key={d._key} x1={d.labelSemana} x2={d.labelSemana} fill={weekendFill} stroke="none" ifOverflow="visible" />
+                        ))}
+                        <XAxis dataKey="labelSemana" scale="band" tick={{ fill: tickFill, fontSize: 11, fontFamily: 'DM Mono' }} axisLine={false} tickLine={false} interval={xInterval} />
                         <YAxis tick={{ fill: tickFill, fontSize: 11, fontFamily: 'DM Mono' }} axisLine={false} tickLine={false} allowDecimals={false} width={30} />
                         <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} />
                         {!selected && <Legend wrapperStyle={{ fontSize: 11, fontFamily: 'DM Mono', paddingTop: 12 }} />}
@@ -466,7 +475,7 @@ export default function Relatorio() {
                       {chartData
                         .filter((r) => selected ? r[selected] > 0 : r._total > 0)
                         .map((r) => (
-                          <tr key={r._key}>
+                          <tr key={r._key} className={r._weekend ? 'tr-weekend' : ''}>
                             <td className="td-dia">
                               {r.label}
                               <span className="td-weekday">{diaSemana(r._key)}</span>
@@ -612,6 +621,7 @@ export default function Relatorio() {
           .td-weekday { margin-left: 8px; color: var(--text-dim); font-size: 11px; }
           .td-total { color: var(--text); font-weight: 700; }
           tfoot td { border-top: 1px solid var(--border-strong); border-bottom: none; color: var(--text); font-weight: 700; padding-top: 10px; }
+          .tr-weekend td { background: var(--weekend-bg); }
 
           @media (max-width: 768px) {
             .cards-rel { grid-template-columns: repeat(2, 1fr); }

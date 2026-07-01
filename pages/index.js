@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Legend
+  ResponsiveContainer, Legend, ReferenceArea
 } from 'recharts';
 import Head from 'next/head';
 import Layout from '../components/Layout';
@@ -15,6 +15,11 @@ const COUNTERS = [
   { id: 'qualificado_civel_ae', label: 'CÍVEL AE', color: '#7F77DD' },
   { id: 'erro',                 label: 'Erros',    color: '#E24B4A' },
 ];
+
+function isWeekendKey(key) {
+  const day = new Date(key + 'T00:00:00Z').getUTCDay();
+  return day === 0 || day === 6;
+}
 
 function buildDayRange(days) {
   const result = [];
@@ -68,7 +73,7 @@ export default function Dashboard() {
     if (!data?.series) return [];
     const dayRange = buildDayRange(days);
     return dayRange.map(({ key, label }) => {
-      const row = { label };
+      const row = { label, _key: key, _weekend: isWeekendKey(key) };
       COUNTERS.forEach(c => {
         const found = data.series.find(s => s.counter_id === c.id && s.dia === key);
         row[c.id] = found ? Number(found.total) : 0;
@@ -101,6 +106,7 @@ export default function Dashboard() {
   const tooltipItemStyle = { color: isDark ? '#fff' : '#1a1a1a' };
   const gridStroke = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
   const tickFill = isDark ? '#888' : '#999';
+  const weekendFill = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.045)';
 
   const sidebarExtra = (
     <>
@@ -207,6 +213,9 @@ export default function Dashboard() {
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={chartData} barCategoryGap="30%" barGap={2}>
                 <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} vertical={false} />
+                {chartData.filter(d => d._weekend).map(d => (
+                  <ReferenceArea key={d._key} x1={d.label} x2={d.label} fill={weekendFill} stroke="none" ifOverflow="visible" />
+                ))}
                 <XAxis
                   dataKey="label"
                   tick={{ fill: tickFill, fontSize: 11, fontFamily: 'DM Mono' }}
