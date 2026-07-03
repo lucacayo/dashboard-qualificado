@@ -193,8 +193,8 @@ export default function Relatorio() {
 
   // Dados período A
   const range = data ? buildRange(data.inicio, data.fim) : [];
-  const chartData = range.map((key) => {
-    const row = { label: labelDia(key), labelSemana: `${labelDia(key)} ${diaSemana(key)}`, _key: key, _weekend: isWeekendKey(key) };
+  const chartData = range.map((key, idx) => {
+    const row = { label: labelDia(key), labelSemana: `${labelDia(key)} ${diaSemana(key)}`, _key: key, _idx: idx, _weekend: isWeekendKey(key) };
     COUNTERS.forEach((c) => {
       const found = data?.series?.find((s) => s.counter_id === c.id && s.dia === key);
       row[c.id] = found ? Number(found.total) : 0;
@@ -204,7 +204,15 @@ export default function Relatorio() {
   });
   const totalGeral = COUNTERS.reduce((s, c) => s + (data?.totais?.[c.id] || 0), 0);
   const temDados = range.length > 0 && totalGeral > 0;
-  const xInterval = chartData.length > 20 ? Math.ceil(chartData.length / 12) : 0;
+  const xTickIndices = (() => {
+    const n = chartData.length;
+    if (n <= 20) return chartData.map((_, i) => i);
+    const step = Math.ceil(n / 12) + 1;
+    const idxs = [];
+    for (let i = 0; i < n; i += step) idxs.push(i);
+    if (idxs[idxs.length - 1] !== n - 1) idxs.push(n - 1);
+    return idxs;
+  })();
 
   const visibleCounters = selected ? COUNTERS.filter(c => c.id === selected) : COUNTERS;
   const selectedCounter = selected ? COUNTERS.find(c => c.id === selected) : null;
@@ -228,6 +236,24 @@ export default function Relatorio() {
   const gridStroke = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
   const tickFill = isDark ? '#888' : '#999';
   const weekendFill = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.045)';
+
+  function renderDateTick({ x, y, payload }) {
+    const row = chartData[payload.value];
+    if (!row) return null;
+    const weekdayAbbr = new Date(row._key + 'T00:00:00Z')
+      .toLocaleDateString('pt-BR', { weekday: 'short', timeZone: 'UTC' })
+      .replace('.', '');
+    return (
+      <g transform={`translate(${x},${y})`}>
+        <text x={0} y={0} dy={12} textAnchor="middle" fill={tickFill} fontSize={11} fontFamily="DM Mono">
+          {row.label}
+        </text>
+        <text x={0} y={0} dy={24} textAnchor="middle" fill={tickFill} fontSize={11} fontFamily="DM Mono">
+          {weekdayAbbr}
+        </text>
+      </g>
+    );
+  }
 
   const labelA = data ? `${labelDia(data.inicio)} – ${labelDia(data.fim)}` : 'Período A';
   const labelB = dataB ? `${labelDia(dataB.inicio)} – ${labelDia(dataB.fim)}` : 'Período B';
@@ -438,11 +464,20 @@ export default function Relatorio() {
                       <LineChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} vertical={false} />
                         {chartData.filter(d => d._weekend).map(d => (
-                          <ReferenceArea key={d._key} x1={d.labelSemana} x2={d.labelSemana} fill={weekendFill} stroke="none" ifOverflow="visible" />
+                          <ReferenceArea key={d._key} x1={d._idx - 0.5} x2={d._idx + 0.5} fill={weekendFill} stroke="none" ifOverflow="visible" />
                         ))}
-                        <XAxis dataKey="labelSemana" scale="band" tick={{ fill: tickFill, fontSize: 11, fontFamily: 'DM Mono' }} axisLine={false} tickLine={false} interval={xInterval} />
+                        <XAxis
+                          dataKey="_idx"
+                          type="number"
+                          domain={[-0.5, chartData.length - 0.5]}
+                          ticks={xTickIndices}
+                          tick={renderDateTick}
+                          axisLine={false}
+                          tickLine={false}
+                          height={40}
+                        />
                         <YAxis tick={{ fill: tickFill, fontSize: 11, fontFamily: 'DM Mono' }} axisLine={false} tickLine={false} allowDecimals={false} width={30} />
-                        <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} />
+                        <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} labelFormatter={(idx) => chartData[idx]?.labelSemana ?? ''} />
                         {!selected && <Legend wrapperStyle={{ fontSize: 11, fontFamily: 'DM Mono', paddingTop: 12 }} />}
                         {visibleCounters.map((c) => (
                           <Line key={c.id} type="monotone" dataKey={c.id} name={c.label} stroke={c.color}
