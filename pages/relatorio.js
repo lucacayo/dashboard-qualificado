@@ -91,6 +91,24 @@ const isWeekendKey = (key) => {
   return day === 0 || day === 6;
 };
 
+function mondayOfWeek(key) {
+  const d = new Date(key + 'T00:00:00Z');
+  const dow = d.getUTCDay(); // 0=domingo..6=sábado
+  const diffToMonday = dow === 0 ? -6 : 1 - dow;
+  const monday = new Date(d.getTime() + diffToMonday * 86400000);
+  return monday.toISOString().slice(0, 10);
+}
+
+const monthKeyOf = (key) => key.slice(0, 7);
+
+function labelMes(monthKey) {
+  const [y, m] = monthKey.split('-').map(Number);
+  const mesAbrev = new Date(Date.UTC(y, m - 1, 1))
+    .toLocaleDateString('pt-BR', { month: 'short', timeZone: 'UTC' })
+    .replace('.', '');
+  return `${mesAbrev}/${y}`;
+}
+
 function delta(a, b) {
   if (a === 0 && b === 0) return null;
   if (a === 0) return { pct: null, label: 'novo', up: true };
@@ -122,6 +140,7 @@ export default function Relatorio() {
   const [errorB, setErrorB] = useState(null);
 
   const [selected, setSelected] = useState(null);
+  const [groupBy, setGroupBy] = useState('dia'); // 'dia' | 'semana' | 'mes'
   const reqSeq = useRef(0);
   const reqSeqB = useRef(0);
   const { theme } = useTheme();
@@ -204,9 +223,36 @@ export default function Relatorio() {
   });
   const totalGeral = COUNTERS.reduce((s, c) => s + (data?.totais?.[c.id] || 0), 0);
   const temDados = range.length > 0 && totalGeral > 0;
+
+  const groupedData = (() => {
+    if (groupBy === 'dia') return chartData;
+    const keyFn = groupBy === 'semana' ? (r) => mondayOfWeek(r._key) : (r) => monthKeyOf(r._key);
+    const buckets = new Map();
+    chartData.forEach((row) => {
+      const bk = keyFn(row);
+      if (!buckets.has(bk)) buckets.set(bk, []);
+      buckets.get(bk).push(row);
+    });
+    const orderedKeys = Array.from(buckets.keys()).sort();
+    return orderedKeys.map((bk, idx) => {
+      const rows = buckets.get(bk);
+      const first = rows[0], last = rows[rows.length - 1];
+      const out = { _key: bk, _idx: idx, _weekend: false };
+      COUNTERS.forEach((c) => { out[c.id] = rows.reduce((s, r) => s + (r[c.id] || 0), 0); });
+      out._total = COUNTERS.reduce((s, c) => s + (out[c.id] || 0), 0);
+      if (groupBy === 'semana') {
+        out.label = first._key === last._key ? first.label : `${first.label}-${last.label}`;
+      } else {
+        out.label = labelMes(bk);
+      }
+      out.labelSemana = out.label;
+      return out;
+    });
+  })();
+
   const xTickIndices = (() => {
-    const n = chartData.length;
-    if (n <= 20) return chartData.map((_, i) => i);
+    const n = groupedData.length;
+    if (n <= 20) return groupedData.map((_, i) => i);
     const step = Math.ceil(n / 12) + 1;
     const idxs = [];
     for (let i = 0; i < n; i += step) idxs.push(i);
@@ -238,18 +284,45 @@ export default function Relatorio() {
   const weekendFill = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.045)';
 
   function renderDateTick({ x, y, payload }) {
-    const row = chartData[payload.value];
+    const row = groupedData[payload.value];
     if (!row) return null;
-    const weekdayAbbr = new Date(row._key + 'T00:00:00Z')
-      .toLocaleDateString('pt-BR', { weekday: 'short', timeZone: 'UTC' })
-      .replace('.', '');
+
+    if (groupBy === 'dia') {
+      const weekdayAbbr = new Date(row._key + 'T00:00:00Z')
+        .toLocaleDateString('pt-BR', { weekday: 'short', timeZone: 'UTC' })
+        .replace('.', '');
+      return (
+        <g transform={`translate(${x},${y})`}>
+          <text x={0} y={0} dy={12} textAnchor="middle" fill={tickFill} fontSize={11} fontFamily="DM Mono">
+            {row.label}
+          </text>
+          <text x={0} y={0} dy={24} textAnchor="middle" fill={tickFill} fontSize={11} fontFamily="DM Mono">
+            {weekdayAbbr}
+          </text>
+        </g>
+      );
+    }
+
+    if (groupBy === 'semana') {
+      const [linha1, linha2] = row.label.includes('-') ? row.label.split('-') : [row.label, ''];
+      return (
+        <g transform={`translate(${x},${y})`}>
+          <text x={0} y={0} dy={12} textAnchor="middle" fill={tickFill} fontSize={11} fontFamily="DM Mono">
+            {linha1}
+          </text>
+          {linha2 && (
+            <text x={0} y={0} dy={24} textAnchor="middle" fill={tickFill} fontSize={11} fontFamily="DM Mono">
+              {linha2}
+            </text>
+          )}
+        </g>
+      );
+    }
+
     return (
       <g transform={`translate(${x},${y})`}>
-        <text x={0} y={0} dy={12} textAnchor="middle" fill={tickFill} fontSize={11} fontFamily="DM Mono">
+        <text x={0} y={0} dy={16} textAnchor="middle" fill={tickFill} fontSize={11} fontFamily="DM Mono">
           {row.label}
-        </text>
-        <text x={0} y={0} dy={24} textAnchor="middle" fill={tickFill} fontSize={11} fontFamily="DM Mono">
-          {weekdayAbbr}
         </text>
       </g>
     );
@@ -448,9 +521,26 @@ export default function Relatorio() {
 
             {/* Gráfico de linha */}
             <div className="chart-box">
-              <div className="chart-title">
-                {selectedCounter ? selectedCounter.label : 'Todos os contadores'}
-                <span className="chart-sub"> — evolução diária</span>
+              <div className="chart-title-row">
+                <div className="chart-title">
+                  {selectedCounter ? selectedCounter.label : 'Todos os contadores'}
+                  <span className="chart-sub"> — evolução {groupBy === 'dia' ? 'diária' : groupBy === 'semana' ? 'semanal' : 'mensal'}</span>
+                </div>
+                <div className="group-toggle">
+                  {[
+                    { k: 'dia', label: 'Dia' },
+                    { k: 'semana', label: 'Semana' },
+                    { k: 'mes', label: 'Mês' },
+                  ].map((g) => (
+                    <button
+                      key={g.k}
+                      className={`group-btn ${groupBy === g.k ? 'active' : ''}`}
+                      onClick={() => setGroupBy(g.k)}
+                    >
+                      {g.label}
+                    </button>
+                  ))}
+                </div>
               </div>
               {error && <div className="msg-error">Erro ao carregar: {error}</div>}
               {loading && <div className="msg-loading">Carregando...</div>}
@@ -459,17 +549,17 @@ export default function Relatorio() {
               )}
               {!loading && !error && temDados && (
                 <div className="chart-scroll">
-                  <div style={{ minWidth: chartData.length > 31 ? chartData.length * 22 : '100%', height: 300 }}>
+                  <div style={{ minWidth: groupedData.length > 31 ? groupedData.length * 22 : '100%', height: 300 }}>
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                      <LineChart data={groupedData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} vertical={false} />
-                        {chartData.filter(d => d._weekend).map(d => (
+                        {groupBy === 'dia' && groupedData.filter(d => d._weekend).map(d => (
                           <ReferenceArea key={d._key} x1={d._idx - 0.5} x2={d._idx + 0.5} fill={weekendFill} stroke="none" ifOverflow="visible" />
                         ))}
                         <XAxis
                           dataKey="_idx"
                           type="number"
-                          domain={[-0.5, chartData.length - 0.5]}
+                          domain={[-0.5, groupedData.length - 0.5]}
                           ticks={xTickIndices}
                           tick={renderDateTick}
                           axisLine={false}
@@ -477,11 +567,11 @@ export default function Relatorio() {
                           height={40}
                         />
                         <YAxis tick={{ fill: tickFill, fontSize: 11, fontFamily: 'DM Mono' }} axisLine={false} tickLine={false} allowDecimals={false} width={30} />
-                        <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} labelFormatter={(idx) => chartData[idx]?.labelSemana ?? ''} />
+                        <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} labelFormatter={(idx) => groupedData[idx]?.labelSemana ?? ''} />
                         {!selected && <Legend wrapperStyle={{ fontSize: 11, fontFamily: 'DM Mono', paddingTop: 12 }} />}
                         {visibleCounters.map((c) => (
                           <Line key={c.id} type="monotone" dataKey={c.id} name={c.label} stroke={c.color}
-                            strokeWidth={selected ? 2.5 : 2} dot={chartData.length <= 31} activeDot={{ r: 4 }} />
+                            strokeWidth={selected ? 2.5 : 2} dot={groupedData.length <= 31} activeDot={{ r: 4 }} />
                         ))}
                       </LineChart>
                     </ResponsiveContainer>
@@ -494,26 +584,26 @@ export default function Relatorio() {
             {!loading && !error && temDados && (
               <div className="chart-box">
                 <div className="chart-title">
-                  Detalhamento por dia
+                  Detalhamento {groupBy === 'dia' ? 'por dia' : groupBy === 'semana' ? 'por semana' : 'por mês'}
                   {selectedCounter && <span className="chart-sub"> — {selectedCounter.label}</span>}
                 </div>
                 <div className="table-scroll">
                   <table>
                     <thead>
                       <tr>
-                        <th>Dia</th>
+                        <th>{groupBy === 'dia' ? 'Dia' : groupBy === 'semana' ? 'Semana' : 'Mês'}</th>
                         {visibleCounters.map((c) => <th key={c.id} style={{ color: c.color }}>{c.label}</th>)}
                         {!selected && <th>Total</th>}
                       </tr>
                     </thead>
                     <tbody>
-                      {chartData
+                      {groupedData
                         .filter((r) => selected ? r[selected] > 0 : r._total > 0)
                         .map((r) => (
                           <tr key={r._key} className={r._weekend ? 'tr-weekend' : ''}>
                             <td className="td-dia">
                               {r.label}
-                              <span className="td-weekday">{diaSemana(r._key)}</span>
+                              {groupBy === 'dia' && <span className="td-weekday">{diaSemana(r._key)}</span>}
                             </td>
                             {visibleCounters.map((c) => <td key={c.id}>{r[c.id] || '·'}</td>)}
                             {!selected && <td className="td-total">{r._total}</td>}
@@ -569,6 +659,17 @@ export default function Relatorio() {
           }
           .preset-btn:hover { color: var(--text); border-color: var(--accent); }
           .preset-btn.active { color: var(--accent); background: var(--accent-bg); border-color: var(--accent-border); }
+
+          .chart-title-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
+          .chart-title-row .chart-title { margin-bottom: 0; }
+          .group-toggle { display: flex; gap: 6px; flex-wrap: wrap; }
+          .group-btn {
+            padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border-strong);
+            background: transparent; color: var(--text-muted); font-size: 12px;
+            font-family: 'DM Mono', monospace; transition: all 0.15s;
+          }
+          .group-btn:hover { color: var(--text); border-color: var(--accent); }
+          .group-btn.active { color: var(--accent); background: var(--accent-bg); border-color: var(--accent-border); }
 
           .date-row { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
           .date-field { display: flex; flex-direction: column; gap: 4px; }
