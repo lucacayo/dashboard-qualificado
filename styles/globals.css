@@ -275,11 +275,11 @@ a { text-decoration: none; color: inherit; }
     letter-spacing: 0.1em;
     color: var(--text);
   }
-  .mobile-right { display: flex; align-items: center; gap: 8px; }
-  .mobile-tabs { display: flex; gap: 6px; }
+  .mobile-right { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .mobile-tabs { display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
   .mtab {
-    font-size: 12px;
-    padding: 6px 12px;
+    font-size: 11px;
+    padding: 6px 9px;
     border-radius: 6px;
     color: var(--text-muted);
     background: var(--nav-hover);

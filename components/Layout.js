@@ -25,6 +25,7 @@ export default function Layout({ activePage, sidebarExtra, children }) {
             <Link href="/" className={`mtab ${activePage === 'painel' ? 'active' : ''}`}>Painel</Link>
             <Link href="/relatorio" className={`mtab ${activePage === 'relatorio' ? 'active' : ''}`}>Relatório</Link>
             <Link href="/funil" className={`mtab ${activePage === 'funil' ? 'active' : ''}`}>Funil</Link>
+            <Link href="/captacao" className={`mtab ${activePage === 'captacao' ? 'active' : ''}`}>Captação</Link>
           </div>
           <button className="theme-btn" onClick={toggleTheme} aria-label="Alternar tema">
             {isDark ? '☀' : '☾'}
@@ -50,6 +51,9 @@ export default function Layout({ activePage, sidebarExtra, children }) {
             </Link>
             <Link href="/funil" className={`nav-item page-link ${activePage === 'funil' ? 'active' : ''}`}>
               Funil de conversão
+            </Link>
+            <Link href="/captacao" className={`nav-item page-link ${activePage === 'captacao' ? 'active' : ''}`}>
+              Captação
             </Link>
           </nav>
 
