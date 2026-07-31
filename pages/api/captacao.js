@@ -114,17 +114,6 @@ export default async function handler(req, res) {
       frequency: totaisConta?.frequency || 0,
     };
 
-    /* Modo diagnóstico: devolve os tipos de ação crus de uma campanha, para
-       conferir contra o que o Gerenciador mostra. Sem ele, o array de ações
-       é descartado — não vai para o cliente em nenhuma resposta normal. */
-    const diagnostico = req.query.campanha
-      ? anuncios
-          .filter((a) => a.campaign_id === req.query.campanha)
-          .map((a) => ({ ad_name: a.ad_name, spend: a.spend, acoes: a.acoes }))
-      : null;
-
-    anuncios.forEach((a) => { delete a.acoes; });
-
     res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=900');
     return res.status(200).json({
       success: true,
@@ -133,7 +122,6 @@ export default async function handler(req, res) {
       totais,
       anuncios,
       serie,
-      ...(diagnostico ? { diagnostico } : {}),
       atualizado_em: new Date().toISOString(),
     });
   } catch (e) {
