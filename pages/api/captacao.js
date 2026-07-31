@@ -1,4 +1,4 @@
-import { classifyCampaign } from '../../lib/segmentos';
+import { classifyCampaign, consolidar, resultadoDoTipo } from '../../lib/segmentos';
 import {
   AD_ACCOUNT_ID,
   MetaError,
@@ -7,7 +7,6 @@ import {
   fetchAdInsights,
   fetchAdMeta,
   fetchDailyAdSeries,
-  sumRows,
   withDerived,
 } from '../../lib/meta';
 
@@ -17,6 +16,21 @@ const MAX_DIAS = 400;
 function diasEntre(inicio, fim) {
   const ms = new Date(`${fim}T00:00:00Z`) - new Date(`${inicio}T00:00:00Z`);
   return Math.floor(ms / 86400000) + 1;
+}
+
+/** Custos por resultado de uma linha, respeitando o tipo da campanha. */
+function metricasDeResultado(linha) {
+  const resultados = resultadoDoTipo(linha, linha.tipo);
+  return {
+    resultados,
+    custo_por_resultado: resultados > 0 ? linha.spend / resultados : 0,
+    // Cada custo só é preenchido para a família de campanha correspondente:
+    // o investimento de uma campanha de formulário não divide conversas.
+    custo_por_lead:
+      linha.tipo === 'leads' && linha.leads > 0 ? linha.spend / linha.leads : 0,
+    custo_por_conversa:
+      linha.tipo === 'wpp' && linha.mensagens > 0 ? linha.spend / linha.mensagens : 0,
+  };
 }
 
 export default async function handler(req, res) {
@@ -60,15 +74,16 @@ export default async function handler(req, res) {
     }
 
     const anuncios = anunciosRaw
-      .map((a) => withDerived({
-        ...a,
-        ...(adMeta[a.ad_id] || {}),
-        ...classifyCampaign(a.campaign_name, a.objective),
-      }))
+      .map((a) => {
+        const base = withDerived({
+          ...a,
+          ...(adMeta[a.ad_id] || {}),
+          ...classifyCampaign(a.campaign_name, a.objective),
+        });
+        return { ...base, ...metricasDeResultado(base) };
+      })
       .sort((a, b) => b.spend - a.spend);
 
-    // Cada linha diária herda a classificação da sua campanha, para que o
-    // gráfico possa ser recortado pelos mesmos filtros da tabela.
     /* Reaproveita classifyCampaign em vez de copiar campo a campo: assim
        uma dimensão nova entra na série sozinha, sem precisar lembrar de
        atualizar dois lugares. */
@@ -82,23 +97,29 @@ export default async function handler(req, res) {
     });
 
     const serie = diariasRaw
-      .map((d) => ({
-        ...d,
-        ...(porCampanha.get(d.campaign_id) || SEM_CLASSIFICACAO),
-      }))
+      .map((d) => {
+        const linha = { ...d, ...(porCampanha.get(d.campaign_id) || SEM_CLASSIFICACAO) };
+        return { ...linha, resultados: resultadoDoTipo(linha, linha.tipo) };
+      })
       .sort((a, b) => (a.dia < b.dia ? -1 : 1));
 
-    // Totais: usa o nível de conta (alcance e frequência não são somáveis)
-    const totais = totaisConta
-      ? withDerived(totaisConta)
-      : withDerived(sumRows(anuncios));
+    /* Os totais saem da soma dos anúncios, e não do nível de conta, porque
+       só a linha do anúncio carrega o tipo da campanha — sem ele não dá
+       para contar o resultado certo. Do nível de conta aproveitamos apenas
+       alcance e frequência, que a Meta calcula por pessoas únicas e não
+       podem ser somados. */
+    const totais = {
+      ...consolidar(anuncios),
+      reach: totaisConta?.reach || 0,
+      frequency: totaisConta?.frequency || 0,
+    };
 
     res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=900');
     return res.status(200).json({
       success: true,
       conta,
       periodo: { inicio: since, fim: until, dias },
-      totais: { ...totais, reach: totaisConta?.reach || 0, frequency: totaisConta?.frequency || 0 },
+      totais,
       anuncios,
       serie,
       atualizado_em: new Date().toISOString(),

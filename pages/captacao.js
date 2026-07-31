@@ -6,7 +6,9 @@ import {
 import Head from 'next/head';
 import Layout from '../components/Layout';
 import { useTheme } from '../components/ThemeContext';
-import { AREAS, TIPOS, DESTINOS, areaInfo, tipoInfo, destinoInfo } from '../lib/segmentos';
+import {
+  AREAS, TIPOS, DESTINOS, areaInfo, tipoInfo, destinoInfo, consolidar,
+} from '../lib/segmentos';
 
 const COR_INVESTIMENTO = '#378ADD';
 const COR_RESULTADO = '#1D9E75';
@@ -63,9 +65,9 @@ const COLUNAS = [
   { k: 'nome', label: 'Nome', tipo: 'texto' },
   { k: 'spend', label: 'Investido', tipo: 'moeda' },
   { k: 'leads', label: 'Leads', tipo: 'inteiro' },
-  { k: 'custo_por_lead', label: 'Custo/lead', tipo: 'moeda' },
+  { k: 'custo_por_lead', label: 'Custo/lead', tipo: 'moeda', tracoSeZero: true },
   { k: 'mensagens', label: 'Conversas', tipo: 'inteiro' },
-  { k: 'custo_por_conversa', label: 'Custo/conversa', tipo: 'moeda' },
+  { k: 'custo_por_conversa', label: 'Custo/conversa', tipo: 'moeda', tracoSeZero: true },
   { k: 'resultados', label: 'Resultados', tipo: 'inteiro' },
   { k: 'impressions', label: 'Impressões', tipo: 'inteiro' },
   { k: 'clicks', label: 'Cliques', tipo: 'inteiro' },
@@ -79,10 +81,12 @@ const inteiro = (v) => (Number(v) || 0).toLocaleString('pt-BR');
 const pct = (v) => `${(Number(v) || 0).toFixed(2).replace('.', ',')}%`;
 const decimal = (v) => (Number(v) || 0).toFixed(2).replace('.', ',');
 
-function formatar(valor, tipo) {
-  if (tipo === 'moeda') return brl(valor);
-  if (tipo === 'pct') return pct(valor);
-  if (tipo === 'inteiro') return inteiro(valor);
+function formatar(valor, coluna) {
+  // Custo que não se aplica àquela família de campanha vira traço, não R$ 0,00.
+  if (coluna.tracoSeZero && !valor) return '—';
+  if (coluna.tipo === 'moeda') return brl(valor);
+  if (coluna.tipo === 'pct') return pct(valor);
+  if (coluna.tipo === 'inteiro') return inteiro(valor);
   return valor;
 }
 
@@ -110,34 +114,7 @@ const statusClasse = (s) => {
   return 'neutro';
 };
 
-/** Soma linhas e recalcula as métricas de razão a partir dos totais. */
-function consolidar(linhas) {
-  const base = linhas.reduce(
-    (acc, r) => ({
-      spend: acc.spend + r.spend,
-      impressions: acc.impressions + r.impressions,
-      clicks: acc.clicks + r.clicks,
-      link_clicks: acc.link_clicks + (r.link_clicks || 0),
-      leads: acc.leads + r.leads,
-      mensagens: acc.mensagens + r.mensagens,
-      resultados: acc.resultados + r.resultados,
-    }),
-    { spend: 0, impressions: 0, clicks: 0, link_clicks: 0, leads: 0, mensagens: 0, resultados: 0 }
-  );
-  return {
-    ...base,
-    ctr: base.impressions > 0 ? (base.clicks / base.impressions) * 100 : 0,
-    cpc: base.clicks > 0 ? base.spend / base.clicks : 0,
-    cpm: base.impressions > 0 ? (base.spend / base.impressions) * 1000 : 0,
-    custo_por_resultado: base.resultados > 0 ? base.spend / base.resultados : 0,
-    // Os dois dividem o mesmo investimento por denominadores diferentes,
-    // então não somam o custo por resultado. Ver comentário em lib/meta.js.
-    custo_por_lead: base.leads > 0 ? base.spend / base.leads : 0,
-    custo_por_conversa: base.mensagens > 0 ? base.spend / base.mensagens : 0,
-  };
-}
-
-/** Quebra os anúncios por uma dimensão ('area' ou 'tipo'), na ordem do catálogo. */
+/** Quebra os anúncios por uma dimensão ('area', 'tipo' ou 'destino'), na ordem do catálogo. */
 function segmentar(anuncios, dimensao, catalogo) {
   return catalogo
     .map((seg) => {
@@ -164,36 +141,28 @@ function agrupar(anuncios, nivel) {
 
   anuncios.forEach((a) => {
     const id = a[idKey] || '—';
-    const atual = mapa.get(id) || {
-      chave: id,
-      nome: a[nomeKey] || '(sem nome)',
-      contexto: nivel === 'adset' ? (a.campaign_name || '') : '',
-      objective: a.objective,
-      area: a.area,
-      tipo: a.tipo,
-      spend: 0, impressions: 0, clicks: 0, link_clicks: 0,
-      leads: 0, mensagens: 0, resultados: 0, anuncios: 0,
-      ativos: 0,
-    };
-    atual.spend += a.spend;
-    atual.impressions += a.impressions;
-    atual.clicks += a.clicks;
-    atual.link_clicks += a.link_clicks;
-    atual.leads += a.leads;
-    atual.mensagens += a.mensagens;
-    atual.resultados += a.resultados;
-    atual.anuncios += 1;
-    if (a.effective_status === 'ACTIVE') atual.ativos += 1;
-    mapa.set(id, atual);
+    if (!mapa.has(id)) {
+      mapa.set(id, {
+        chave: id,
+        nome: a[nomeKey] || '(sem nome)',
+        contexto: nivel === 'adset' ? (a.campaign_name || '') : '',
+        objective: a.objective,
+        area: a.area,
+        tipo: a.tipo,
+        destino: a.destino,
+        linhas: [],
+      });
+    }
+    mapa.get(id).linhas.push(a);
   });
 
-  return [...mapa.values()].map((g) => ({
+  // consolidar cuida de contar o resultado pelo tipo da campanha e de
+  // casar cada custo com o investimento da sua própria família.
+  return [...mapa.values()].map(({ linhas, ...g }) => ({
     ...g,
-    effective_status: g.ativos > 0 ? 'ACTIVE' : 'PAUSED',
-    ctr: g.impressions > 0 ? (g.clicks / g.impressions) * 100 : 0,
-    cpc: g.clicks > 0 ? g.spend / g.clicks : 0,
-    cpm: g.impressions > 0 ? (g.spend / g.impressions) * 1000 : 0,
-    custo_por_resultado: g.resultados > 0 ? g.spend / g.resultados : 0,
+    ...consolidar(linhas),
+    anuncios: linhas.length,
+    effective_status: linhas.some((l) => l.effective_status === 'ACTIVE') ? 'ACTIVE' : 'PAUSED',
   }));
 }
 
@@ -550,18 +519,22 @@ export default function Captacao() {
             <div className="card-label">Resultados</div>
             <div className="card-value accent">{loading ? '—' : inteiro(totais?.resultados)}</div>
             <div className="card-sub">
-              {inteiro(totais?.leads)} leads · {inteiro(totais?.mensagens)} conversas
+              {inteiro(totais?.leads_form)} leads · {inteiro(totais?.conversas_wpp)} conversas
             </div>
           </div>
           <div className="card card-highlight">
             <div className="card-label">Custo por lead</div>
             <div className="card-value accent">{loading ? '—' : brl(totais?.custo_por_lead)}</div>
-            <div className="card-sub">{inteiro(totais?.leads)} leads de formulário</div>
+            <div className="card-sub">
+              {inteiro(totais?.leads_form)} leads · campanhas [Leads]
+            </div>
           </div>
           <div className="card card-highlight">
             <div className="card-label">Custo por conversa</div>
             <div className="card-value accent">{loading ? '—' : brl(totais?.custo_por_conversa)}</div>
-            <div className="card-sub">{inteiro(totais?.mensagens)} conversas iniciadas</div>
+            <div className="card-sub">
+              {inteiro(totais?.conversas_wpp)} conversas · campanhas [WPP]
+            </div>
           </div>
           <div className="card">
             <div className="card-label">Impressões</div>
@@ -631,12 +604,16 @@ export default function Captacao() {
                       <div className="seg-valor">{brl(s.spend)}</div>
                       <div className="seg-custos">
                         <div className="seg-custo">
-                          <span className="sc-label">{inteiro(s.leads)} leads</span>
-                          <span className="sc-val">{s.leads > 0 ? `${brl(s.custo_por_lead)}/lead` : '—'}</span>
+                          <span className="sc-label">{inteiro(s.leads_form)} leads</span>
+                          <span className="sc-val">
+                            {s.leads_form > 0 ? `${brl(s.custo_por_lead)}/lead` : '—'}
+                          </span>
                         </div>
                         <div className="seg-custo">
-                          <span className="sc-label">{inteiro(s.mensagens)} conversas</span>
-                          <span className="sc-val">{s.mensagens > 0 ? `${brl(s.custo_por_conversa)}/conversa` : '—'}</span>
+                          <span className="sc-label">{inteiro(s.conversas_wpp)} conversas</span>
+                          <span className="sc-val">
+                            {s.conversas_wpp > 0 ? `${brl(s.custo_por_conversa)}/conversa` : '—'}
+                          </span>
                         </div>
                       </div>
                       <div className="seg-detalhe">
@@ -650,10 +627,11 @@ export default function Captacao() {
             ))}
 
             <div className="nota-custos">
-              Custo por lead e custo por conversa dividem o mesmo investimento por
-              denominadores diferentes — a Meta não reparte o gasto entre os tipos de
-              resultado. Por isso os dois não somam o custo por resultado, igual ao
-              Gerenciador de Anúncios.
+              O resultado de cada campanha é a métrica que ela otimiza: campanhas
+              [Leads] contam leads do formulário nativo, campanhas [WPP] contam
+              conversas iniciadas. Uma campanha de formulário pode registrar
+              conversas também — elas aparecem na tabela, mas não entram no
+              resultado dela, do mesmo jeito que no Gerenciador de Anúncios.
             </div>
           </>
         )}
@@ -774,7 +752,7 @@ export default function Captacao() {
                         </div>
                       </td>
                       {COLUNAS.filter((c) => c.k !== 'nome').map((c) => (
-                        <td key={c.k} className="td-num">{formatar(l[c.k], c.tipo)}</td>
+                        <td key={c.k} className="td-num">{formatar(l[c.k], c)}</td>
                       ))}
                     </tr>
                   ))}
