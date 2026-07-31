@@ -29,13 +29,30 @@ function presetRange(preset) {
   const { y, m, d } = brParts();
   const hoje = `${y}-${pad(m)}-${pad(d)}`;
   const base = Date.UTC(y, m - 1, d);
+  const ontem = ymdFromUTC(new Date(base - 86400000));
+
   if (preset === 'hoje') return { inicio: hoje, fim: hoje };
-  if (preset === 'ontem') {
-    const ontem = ymdFromUTC(new Date(base - 86400000));
-    return { inicio: ontem, fim: ontem };
+  if (preset === 'ontem') return { inicio: ontem, fim: ontem };
+
+  /* 7 e 30 dias terminam ontem: incluir o dia em andamento puxaria as
+     médias para baixo, porque as horas que ainda não passaram entram
+     no divisor sem nenhum resultado. */
+  if (preset === '7dias') return { inicio: ymdFromUTC(new Date(base - 7 * 86400000)), fim: ontem };
+  if (preset === '30dias') return { inicio: ymdFromUTC(new Date(base - 30 * 86400000)), fim: ontem };
+
+  // Semana de domingo a sábado.
+  if (preset === 'estasemana') {
+    const domingo = base - new Date(base).getUTCDay() * 86400000;
+    return { inicio: ymdFromUTC(new Date(domingo)), fim: hoje };
   }
-  if (preset === '7dias') return { inicio: ymdFromUTC(new Date(base - 6 * 86400000)), fim: hoje };
-  if (preset === '30dias') return { inicio: ymdFromUTC(new Date(base - 29 * 86400000)), fim: hoje };
+  if (preset === 'semanapassada') {
+    const domingoAtual = base - new Date(base).getUTCDay() * 86400000;
+    return {
+      inicio: ymdFromUTC(new Date(domingoAtual - 7 * 86400000)),
+      fim: ymdFromUTC(new Date(domingoAtual - 86400000)),
+    };
+  }
+
   if (preset === 'mes') return { inicio: `${y}-${pad(m)}-01`, fim: hoje };
   if (preset === 'mespassado') {
     const ly = m === 1 ? y - 1 : y;
@@ -49,11 +66,16 @@ function presetRange(preset) {
 const PRESETS = [
   { k: 'hoje', label: 'Hoje' },
   { k: 'ontem', label: 'Ontem' },
+  { k: 'estasemana', label: 'Nesta semana' },
+  { k: 'semanapassada', label: 'Semana passada' },
   { k: '7dias', label: '7 dias' },
   { k: '30dias', label: '30 dias' },
   { k: 'mes', label: 'Este mês' },
   { k: 'mespassado', label: 'Mês passado' },
 ];
+
+const PRESET_PADRAO = 'ontem';
+const NIVEL_PADRAO = 'campaign';
 
 const NIVEIS = [
   { k: 'ad', label: 'Anúncio' },
@@ -167,14 +189,14 @@ function agrupar(anuncios, nivel) {
 }
 
 export default function Captacao() {
-  const inicial = presetRange('30dias');
+  const inicial = presetRange(PRESET_PADRAO);
   const { y: maxY, m: maxM, d: maxD } = brParts();
   const hojeStr = `${maxY}-${pad(maxM)}-${pad(maxD)}`;
 
   const [inicio, setInicio] = useState(inicial.inicio);
   const [fim, setFim] = useState(inicial.fim);
-  const [activePreset, setActivePreset] = useState('30dias');
-  const [nivel, setNivel] = useState('ad');
+  const [activePreset, setActivePreset] = useState(PRESET_PADRAO);
+  const [nivel, setNivel] = useState(NIVEL_PADRAO);
   const [somenteAtivos, setSomenteAtivos] = useState(false);
   const [ordenacao, setOrdenacao] = useState({ coluna: 'spend', desc: true });
   const [filtroArea, setFiltroArea] = useState('todas');
@@ -389,16 +411,24 @@ export default function Captacao() {
       >
         Todos
       </button>
-      {DESTINOS.filter((d) => segmentosDestino.some((s) => s.id === d.id)).map((d) => (
-        <button
-          key={d.id}
-          className={`nav-item ${filtroDestino === d.id ? 'active' : ''}`}
-          onClick={() => setFiltroDestino((v) => (v === d.id ? 'todos' : d.id))}
-        >
-          <span className="nav-dot" style={{ background: d.color }} />
-          {d.curto}
-        </button>
-      ))}
+      {/* Sempre mostra as três opções, mesmo zeradas: "Sem marcação" com
+          contagem é o atalho para achar campanhas a renomear. */}
+      {DESTINOS.map((d) => {
+        const seg = segmentosDestino.find((s) => s.id === d.id);
+        const qtd = seg ? seg.campanhas : 0;
+        return (
+          <button
+            key={d.id}
+            className={`nav-item ${filtroDestino === d.id ? 'active' : ''} ${qtd === 0 ? 'vazio' : ''}`}
+            onClick={() => setFiltroDestino((v) => (v === d.id ? 'todos' : d.id))}
+            title={qtd === 0 ? 'Nenhuma campanha neste destino no período' : undefined}
+          >
+            <span className="nav-dot" style={{ background: d.color }} />
+            {d.curto}
+            <span className="nav-contagem">{qtd}</span>
+          </button>
+        );
+      })}
 
       <div className="nav-label" style={{ marginTop: 16 }}>Agrupar por</div>
       {NIVEIS.map((n) => (
@@ -859,6 +889,19 @@ export default function Captacao() {
           .chip:hover { border-color: var(--accent); color: var(--text); }
           .chip-x { color: var(--text-dim); font-size: 13px; line-height: 1; }
           .chip-limpar { border-style: dashed; color: var(--text-dim); }
+
+          .nav-contagem {
+            margin-left: auto;
+            font-size: 10px;
+            font-family: 'DM Mono', monospace;
+            color: var(--text-dim);
+            background: var(--nav-hover);
+            border-radius: 10px;
+            padding: 1px 6px;
+            min-width: 20px;
+            text-align: center;
+          }
+          .vazio { opacity: 0.45; }
 
           .nota-alcance {
             font-size: 11px;
