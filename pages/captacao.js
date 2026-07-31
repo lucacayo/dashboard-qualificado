@@ -524,16 +524,24 @@ export default function Captacao() {
           </div>
           <div className="card card-highlight">
             <div className="card-label">Custo por lead</div>
-            <div className="card-value accent">{loading ? '—' : brl(totais?.custo_por_lead)}</div>
+            <div className="card-value accent">
+              {loading || !totais?.leads_form ? '—' : brl(totais.custo_por_lead)}
+            </div>
             <div className="card-sub">
-              {inteiro(totais?.leads_form)} leads · campanhas [Leads]
+              {totais?.leads_form
+                ? `${inteiro(totais.leads_form)} leads · campanhas [Leads]`
+                : 'sem campanhas de formulário no recorte'}
             </div>
           </div>
           <div className="card card-highlight">
             <div className="card-label">Custo por conversa</div>
-            <div className="card-value accent">{loading ? '—' : brl(totais?.custo_por_conversa)}</div>
+            <div className="card-value accent">
+              {loading || !totais?.conversas_wpp ? '—' : brl(totais.custo_por_conversa)}
+            </div>
             <div className="card-sub">
-              {inteiro(totais?.conversas_wpp)} conversas · campanhas [WPP]
+              {totais?.conversas_wpp
+                ? `${inteiro(totais.conversas_wpp)} conversas · campanhas [WPP]`
+                : 'sem campanhas de WhatsApp no recorte'}
             </div>
           </div>
           <div className="card">
