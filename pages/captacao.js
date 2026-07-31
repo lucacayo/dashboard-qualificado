@@ -6,6 +6,7 @@ import {
 import Head from 'next/head';
 import Layout from '../components/Layout';
 import { useTheme } from '../components/ThemeContext';
+import { AREAS, TIPOS, areaInfo, tipoInfo } from '../lib/segmentos';
 
 const COR_INVESTIMENTO = '#378ADD';
 const COR_RESULTADO = '#1D9E75';
@@ -107,6 +108,40 @@ const statusClasse = (s) => {
   return 'neutro';
 };
 
+/** Soma linhas e recalcula as métricas de razão a partir dos totais. */
+function consolidar(linhas) {
+  const base = linhas.reduce(
+    (acc, r) => ({
+      spend: acc.spend + r.spend,
+      impressions: acc.impressions + r.impressions,
+      clicks: acc.clicks + r.clicks,
+      link_clicks: acc.link_clicks + (r.link_clicks || 0),
+      leads: acc.leads + r.leads,
+      mensagens: acc.mensagens + r.mensagens,
+      resultados: acc.resultados + r.resultados,
+    }),
+    { spend: 0, impressions: 0, clicks: 0, link_clicks: 0, leads: 0, mensagens: 0, resultados: 0 }
+  );
+  return {
+    ...base,
+    ctr: base.impressions > 0 ? (base.clicks / base.impressions) * 100 : 0,
+    cpc: base.clicks > 0 ? base.spend / base.clicks : 0,
+    cpm: base.impressions > 0 ? (base.spend / base.impressions) * 1000 : 0,
+    custo_por_resultado: base.resultados > 0 ? base.spend / base.resultados : 0,
+  };
+}
+
+/** Quebra os anúncios por uma dimensão ('area' ou 'tipo'), na ordem do catálogo. */
+function segmentar(anuncios, dimensao, catalogo) {
+  return catalogo
+    .map((seg) => {
+      const linhas = anuncios.filter((a) => a[dimensao] === seg.id);
+      if (linhas.length === 0) return null;
+      return { ...seg, ...consolidar(linhas), campanhas: new Set(linhas.map((l) => l.campaign_id)).size };
+    })
+    .filter(Boolean);
+}
+
 /** Reagrupa as linhas de anúncio por conjunto ou campanha, recalculando as métricas. */
 function agrupar(anuncios, nivel) {
   if (nivel === 'ad') {
@@ -128,6 +163,8 @@ function agrupar(anuncios, nivel) {
       nome: a[nomeKey] || '(sem nome)',
       contexto: nivel === 'adset' ? (a.campaign_name || '') : '',
       objective: a.objective,
+      area: a.area,
+      tipo: a.tipo,
       spend: 0, impressions: 0, clicks: 0, link_clicks: 0,
       leads: 0, mensagens: 0, resultados: 0, anuncios: 0,
       ativos: 0,
@@ -165,6 +202,8 @@ export default function Captacao() {
   const [nivel, setNivel] = useState('ad');
   const [somenteAtivos, setSomenteAtivos] = useState(false);
   const [ordenacao, setOrdenacao] = useState({ coluna: 'spend', desc: true });
+  const [filtroArea, setFiltroArea] = useState('todas');
+  const [filtroTipo, setFiltroTipo] = useState('todos');
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -210,12 +249,41 @@ export default function Captacao() {
     carregar(inicio, fim);
   };
 
-  const totais = data?.totais;
   const dias = data?.periodo?.dias || 1;
+  const filtrando = filtroArea !== 'todas' || filtroTipo !== 'todos';
+
+  const casaComFiltro = useCallback(
+    (r) =>
+      (filtroArea === 'todas' || r.area === filtroArea) &&
+      (filtroTipo === 'todos' || r.tipo === filtroTipo),
+    [filtroArea, filtroTipo]
+  );
+
+  const anunciosFiltrados = useMemo(
+    () => (data?.anuncios || []).filter(casaComFiltro),
+    [data, casaComFiltro]
+  );
+
+  /* Sem filtro usamos os totais do nível de conta, que trazem o alcance
+     real. Com filtro é preciso somar os anúncios — e aí o alcance fica de
+     fora de propósito: somar alcance conta a mesma pessoa várias vezes. */
+  const totais = useMemo(() => {
+    if (!data) return null;
+    if (!filtrando) return data.totais;
+    return { ...consolidar(anunciosFiltrados), reach: null, frequency: null };
+  }, [data, filtrando, anunciosFiltrados]);
+
+  const segmentosArea = useMemo(
+    () => segmentar(data?.anuncios || [], 'area', AREAS),
+    [data]
+  );
+  const segmentosTipo = useMemo(
+    () => segmentar(data?.anuncios || [], 'tipo', TIPOS),
+    [data]
+  );
 
   const linhas = useMemo(() => {
-    if (!data?.anuncios) return [];
-    const base = agrupar(data.anuncios, nivel);
+    const base = agrupar(anunciosFiltrados, nivel);
     const filtradas = somenteAtivos
       ? base.filter((l) => l.effective_status === 'ACTIVE')
       : base;
@@ -228,17 +296,27 @@ export default function Captacao() {
       const vb = Number(b[coluna]) || 0;
       return desc ? vb - va : va - vb;
     });
-  }, [data, nivel, somenteAtivos, ordenacao]);
+  }, [anunciosFiltrados, nivel, somenteAtivos, ordenacao]);
 
+  // A série vem por anúncio e por dia, então o gráfico acompanha os filtros.
   const chartData = useMemo(() => {
     if (!data?.serie) return [];
-    return data.serie.map((d) => ({
-      label: labelDia(d.dia),
-      _key: d.dia,
-      investimento: Number(d.spend.toFixed(2)),
-      resultados: d.resultados,
-    }));
-  }, [data]);
+    const porDia = new Map();
+    data.serie.filter(casaComFiltro).forEach((d) => {
+      const atual = porDia.get(d.dia) || { spend: 0, resultados: 0 };
+      atual.spend += d.spend;
+      atual.resultados += d.resultados;
+      porDia.set(d.dia, atual);
+    });
+    return [...porDia.entries()]
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .map(([dia, v]) => ({
+        label: labelDia(dia),
+        _key: dia,
+        investimento: Number(v.spend.toFixed(2)),
+        resultados: v.resultados,
+      }));
+  }, [data, casaComFiltro]);
 
   const temDados = chartData.some((d) => d.investimento > 0 || d.resultados > 0);
 
@@ -252,6 +330,11 @@ export default function Captacao() {
   const tooltipItemStyle = { color: isDark ? '#fff' : '#1a1a1a' };
   const gridStroke = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
   const tickFill = isDark ? '#888' : '#999';
+
+  const rotuloFiltro = [
+    filtroArea !== 'todas' ? areaInfo(filtroArea).label : null,
+    filtroTipo !== 'todos' ? tipoInfo(filtroTipo).label : null,
+  ].filter(Boolean).join(' · ');
 
   const ordenarPor = (coluna) => {
     setOrdenacao((prev) =>
@@ -271,6 +354,42 @@ export default function Captacao() {
           onClick={() => aplicarPreset(p.k)}
         >
           {p.label}
+        </button>
+      ))}
+
+      <div className="nav-label" style={{ marginTop: 16 }}>Área</div>
+      <button
+        className={`nav-item ${filtroArea === 'todas' ? 'active' : ''}`}
+        onClick={() => setFiltroArea('todas')}
+      >
+        Todas
+      </button>
+      {AREAS.filter((a) => segmentosArea.some((s) => s.id === a.id)).map((a) => (
+        <button
+          key={a.id}
+          className={`nav-item ${filtroArea === a.id ? 'active' : ''}`}
+          onClick={() => setFiltroArea((v) => (v === a.id ? 'todas' : a.id))}
+        >
+          <span className="nav-dot" style={{ background: a.color }} />
+          {a.curto}
+        </button>
+      ))}
+
+      <div className="nav-label" style={{ marginTop: 16 }}>Captação</div>
+      <button
+        className={`nav-item ${filtroTipo === 'todos' ? 'active' : ''}`}
+        onClick={() => setFiltroTipo('todos')}
+      >
+        Todas
+      </button>
+      {TIPOS.filter((t) => segmentosTipo.some((s) => s.id === t.id)).map((t) => (
+        <button
+          key={t.id}
+          className={`nav-item ${filtroTipo === t.id ? 'active' : ''}`}
+          onClick={() => setFiltroTipo((v) => (v === t.id ? 'todos' : t.id))}
+        >
+          <span className="nav-dot" style={{ background: t.color }} />
+          {t.curto}
         </button>
       ))}
 
@@ -351,6 +470,33 @@ export default function Captacao() {
           </div>
         )}
 
+        {/* Filtros ativos */}
+        {filtrando && (
+          <div className="filtros-ativos">
+            <span className="fa-label">Filtrando por</span>
+            {filtroArea !== 'todas' && (
+              <button className="chip" onClick={() => setFiltroArea('todas')}>
+                <span className="nav-dot" style={{ background: areaInfo(filtroArea).color }} />
+                {areaInfo(filtroArea).label}
+                <span className="chip-x">×</span>
+              </button>
+            )}
+            {filtroTipo !== 'todos' && (
+              <button className="chip" onClick={() => setFiltroTipo('todos')}>
+                <span className="nav-dot" style={{ background: tipoInfo(filtroTipo).color }} />
+                {tipoInfo(filtroTipo).label}
+                <span className="chip-x">×</span>
+              </button>
+            )}
+            <button
+              className="chip chip-limpar"
+              onClick={() => { setFiltroArea('todas'); setFiltroTipo('todos'); }}
+            >
+              limpar tudo
+            </button>
+          </div>
+        )}
+
         {/* Cards de resumo */}
         <div className="cards-grid">
           <div className="card card-highlight">
@@ -375,7 +521,9 @@ export default function Captacao() {
           <div className="card">
             <div className="card-label">Impressões</div>
             <div className="card-value">{loading ? '—' : inteiro(totais?.impressions)}</div>
-            <div className="card-sub">alcance {inteiro(totais?.reach)}</div>
+            <div className="card-sub">
+              {totais?.reach == null ? 'alcance indisponível no recorte' : `alcance ${inteiro(totais.reach)}`}
+            </div>
           </div>
           <div className="card">
             <div className="card-label">Cliques</div>
@@ -391,7 +539,9 @@ export default function Captacao() {
           </div>
           <div className="mini">
             <span className="mini-label">Frequência</span>
-            <span className="mini-val">{loading ? '—' : decimal(totais?.frequency)}</span>
+            <span className="mini-val">
+              {loading || totais?.frequency == null ? '—' : decimal(totais.frequency)}
+            </span>
           </div>
           <div className="mini">
             <span className="mini-label">Cliques no link</span>
@@ -399,15 +549,73 @@ export default function Captacao() {
           </div>
           <div className="mini">
             <span className="mini-label">Anúncios veiculados</span>
-            <span className="mini-val">{loading ? '—' : inteiro(data?.anuncios?.length)}</span>
+            <span className="mini-val">{loading ? '—' : inteiro(anunciosFiltrados.length)}</span>
           </div>
         </div>
+
+        {filtrando && (
+          <div className="nota-alcance">
+            Alcance e frequência só aparecem sem filtro: a Meta os calcula por
+            pessoas únicas, e somar os anúncios contaria a mesma pessoa mais de uma vez.
+          </div>
+        )}
+
+        {/* Quebra por área e por tipo de captação */}
+        {!loading && !error && segmentosArea.length > 0 && (
+          <>
+            <div className="section-label">Por área</div>
+            <div className="seg-grid">
+              {segmentosArea.map((s) => (
+                <button
+                  key={s.id}
+                  className={`seg-card ${filtroArea === s.id ? 'active' : ''}`}
+                  style={{ '--c': s.color }}
+                  onClick={() => setFiltroArea((v) => (v === s.id ? 'todas' : s.id))}
+                >
+                  <div className="seg-nome">{s.label}</div>
+                  <div className="seg-valor">{brl(s.spend)}</div>
+                  <div className="seg-linha">
+                    <span>{inteiro(s.resultados)} resultados</span>
+                    <span className="seg-cpr">{brl(s.custo_por_resultado)}/result.</span>
+                  </div>
+                  <div className="seg-detalhe">
+                    {inteiro(s.leads)} leads · {inteiro(s.mensagens)} conversas ·{' '}
+                    {s.campanhas} {s.campanhas === 1 ? 'campanha' : 'campanhas'}
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <div className="section-label">Por tipo de captação</div>
+            <div className="seg-grid">
+              {segmentosTipo.map((s) => (
+                <button
+                  key={s.id}
+                  className={`seg-card ${filtroTipo === s.id ? 'active' : ''}`}
+                  style={{ '--c': s.color }}
+                  onClick={() => setFiltroTipo((v) => (v === s.id ? 'todos' : s.id))}
+                >
+                  <div className="seg-nome">{s.label}</div>
+                  <div className="seg-valor">{brl(s.spend)}</div>
+                  <div className="seg-linha">
+                    <span>{inteiro(s.resultados)} resultados</span>
+                    <span className="seg-cpr">{brl(s.custo_por_resultado)}/result.</span>
+                  </div>
+                  <div className="seg-detalhe">
+                    {inteiro(s.leads)} leads · {inteiro(s.mensagens)} conversas ·{' '}
+                    {s.campanhas} {s.campanhas === 1 ? 'campanha' : 'campanhas'}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
 
         {/* Gráfico */}
         <div className="chart-box">
           <div className="chart-title">
             Investimento e resultados
-            <span className="chart-sub"> — por dia</span>
+            <span className="chart-sub"> — por dia{rotuloFiltro && ` · ${rotuloFiltro}`}</span>
           </div>
 
           {loading && <div className="msg-loading">Carregando...</div>}
@@ -586,6 +794,87 @@ export default function Captacao() {
             border-radius: 4px;
             padding: 1px 5px;
             font-family: 'DM Mono', monospace;
+          }
+
+          .filtros-ativos {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 16px;
+          }
+          .fa-label {
+            font-size: 10px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            font-family: 'DM Mono', monospace;
+          }
+          .chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 10px;
+            border-radius: 20px;
+            border: 1px solid var(--border-strong);
+            background: var(--card-bg);
+            color: var(--text-sub);
+            font-size: 11px;
+            font-family: 'DM Mono', monospace;
+            transition: all 0.15s;
+          }
+          .chip:hover { border-color: var(--accent); color: var(--text); }
+          .chip-x { color: var(--text-dim); font-size: 13px; line-height: 1; }
+          .chip-limpar { border-style: dashed; color: var(--text-dim); }
+
+          .nota-alcance {
+            font-size: 11px;
+            color: var(--text-dim);
+            font-family: 'DM Mono', monospace;
+            line-height: 1.5;
+            margin: -16px 0 24px;
+          }
+
+          .seg-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+            gap: 10px;
+            margin-bottom: 26px;
+          }
+          .seg-card {
+            text-align: left;
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--c);
+            border-radius: 12px;
+            padding: 14px;
+            box-shadow: var(--shadow);
+            transition: background 0.15s, border-color 0.15s;
+          }
+          .seg-card:hover { background: var(--card-hover); }
+          .seg-card.active { background: var(--card-hover); border-color: var(--border-strong); border-left-color: var(--c); }
+          .seg-nome {
+            font-size: 11px;
+            color: var(--text-muted);
+            font-family: 'DM Mono', monospace;
+            margin-bottom: 6px;
+          }
+          .seg-valor { font-size: 22px; font-weight: 700; color: var(--text); line-height: 1; }
+          .seg-linha {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            margin-top: 8px;
+            font-size: 11px;
+            color: var(--text-sub);
+            font-family: 'DM Mono', monospace;
+          }
+          .seg-cpr { color: var(--c); }
+          .seg-detalhe {
+            font-size: 10px;
+            color: var(--text-dim);
+            font-family: 'DM Mono', monospace;
+            margin-top: 5px;
           }
 
           .cards-grid {

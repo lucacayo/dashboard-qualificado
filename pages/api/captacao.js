@@ -1,3 +1,4 @@
+import { classifyCampaign } from '../../lib/segmentos';
 import {
   AD_ACCOUNT_ID,
   MetaError,
@@ -5,7 +6,7 @@ import {
   fetchAccountTotals,
   fetchAdInsights,
   fetchAdMeta,
-  fetchDailySeries,
+  fetchDailyAdSeries,
   sumRows,
   withDerived,
 } from '../../lib/meta';
@@ -41,11 +42,11 @@ export default async function handler(req, res) {
   const timeRange = { since, until };
 
   try {
-    const [conta, anunciosRaw, totaisConta, serieRaw] = await Promise.all([
+    const [conta, anunciosRaw, totaisConta, diariasRaw] = await Promise.all([
       fetchAccount(AD_ACCOUNT_ID),
       fetchAdInsights(AD_ACCOUNT_ID, timeRange),
       fetchAccountTotals(AD_ACCOUNT_ID, timeRange),
-      fetchDailySeries(AD_ACCOUNT_ID, timeRange),
+      fetchDailyAdSeries(AD_ACCOUNT_ID, timeRange),
     ]);
 
     // Enriquece cada anúncio com status e miniatura
@@ -59,17 +60,33 @@ export default async function handler(req, res) {
     }
 
     const anuncios = anunciosRaw
-      .map((a) => withDerived({ ...a, ...(adMeta[a.ad_id] || {}) }))
+      .map((a) => withDerived({
+        ...a,
+        ...(adMeta[a.ad_id] || {}),
+        ...classifyCampaign(a.campaign_name, a.objective),
+      }))
       .sort((a, b) => b.spend - a.spend);
+
+    // Cada linha diária herda a classificação da sua campanha, para que o
+    // gráfico possa ser recortado pelos mesmos filtros da tabela.
+    const porCampanha = new Map();
+    anuncios.forEach((a) => {
+      if (a.campaign_id && !porCampanha.has(a.campaign_id)) {
+        porCampanha.set(a.campaign_id, { area: a.area, tipo: a.tipo });
+      }
+    });
+
+    const serie = diariasRaw
+      .map((d) => ({
+        ...d,
+        ...(porCampanha.get(d.campaign_id) || { area: 'outros', tipo: 'outros' }),
+      }))
+      .sort((a, b) => (a.dia < b.dia ? -1 : 1));
 
     // Totais: usa o nível de conta (alcance e frequência não são somáveis)
     const totais = totaisConta
       ? withDerived(totaisConta)
       : withDerived(sumRows(anuncios));
-
-    const serie = serieRaw
-      .map((d) => withDerived(d))
-      .sort((a, b) => (a.dia < b.dia ? -1 : 1));
 
     res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=900');
     return res.status(200).json({
