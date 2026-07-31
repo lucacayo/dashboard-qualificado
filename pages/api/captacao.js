@@ -6,7 +6,7 @@ import {
   fetchAccountTotals,
   fetchAdInsights,
   fetchAdMeta,
-  fetchDailyAdSeries,
+  fetchDailyCampaignSeries,
   withDerived,
 } from '../../lib/meta';
 
@@ -60,7 +60,7 @@ export default async function handler(req, res) {
       fetchAccount(AD_ACCOUNT_ID),
       fetchAdInsights(AD_ACCOUNT_ID, timeRange),
       fetchAccountTotals(AD_ACCOUNT_ID, timeRange),
-      fetchDailyAdSeries(AD_ACCOUNT_ID, timeRange),
+      fetchDailyCampaignSeries(AD_ACCOUNT_ID, timeRange),
     ]);
 
     // Enriquece cada anúncio com status e miniatura
