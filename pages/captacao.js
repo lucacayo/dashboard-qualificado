@@ -6,7 +6,7 @@ import {
 import Head from 'next/head';
 import Layout from '../components/Layout';
 import { useTheme } from '../components/ThemeContext';
-import { AREAS, TIPOS, areaInfo, tipoInfo } from '../lib/segmentos';
+import { AREAS, TIPOS, DESTINOS, areaInfo, tipoInfo, destinoInfo } from '../lib/segmentos';
 
 const COR_INVESTIMENTO = '#378ADD';
 const COR_RESULTADO = '#1D9E75';
@@ -62,12 +62,14 @@ const NIVEIS = [
 const COLUNAS = [
   { k: 'nome', label: 'Nome', tipo: 'texto' },
   { k: 'spend', label: 'Investido', tipo: 'moeda' },
+  { k: 'leads', label: 'Leads', tipo: 'inteiro' },
+  { k: 'custo_por_lead', label: 'Custo/lead', tipo: 'moeda' },
+  { k: 'mensagens', label: 'Conversas', tipo: 'inteiro' },
+  { k: 'custo_por_conversa', label: 'Custo/conversa', tipo: 'moeda' },
   { k: 'resultados', label: 'Resultados', tipo: 'inteiro' },
-  { k: 'custo_por_resultado', label: 'Custo/result.', tipo: 'moeda' },
   { k: 'impressions', label: 'Impressões', tipo: 'inteiro' },
   { k: 'clicks', label: 'Cliques', tipo: 'inteiro' },
   { k: 'ctr', label: 'CTR', tipo: 'pct' },
-  { k: 'cpc', label: 'CPC', tipo: 'moeda' },
   { k: 'cpm', label: 'CPM', tipo: 'moeda' },
 ];
 
@@ -128,6 +130,10 @@ function consolidar(linhas) {
     cpc: base.clicks > 0 ? base.spend / base.clicks : 0,
     cpm: base.impressions > 0 ? (base.spend / base.impressions) * 1000 : 0,
     custo_por_resultado: base.resultados > 0 ? base.spend / base.resultados : 0,
+    // Os dois dividem o mesmo investimento por denominadores diferentes,
+    // então não somam o custo por resultado. Ver comentário em lib/meta.js.
+    custo_por_lead: base.leads > 0 ? base.spend / base.leads : 0,
+    custo_por_conversa: base.mensagens > 0 ? base.spend / base.mensagens : 0,
   };
 }
 
@@ -204,6 +210,7 @@ export default function Captacao() {
   const [ordenacao, setOrdenacao] = useState({ coluna: 'spend', desc: true });
   const [filtroArea, setFiltroArea] = useState('todas');
   const [filtroTipo, setFiltroTipo] = useState('todos');
+  const [filtroDestino, setFiltroDestino] = useState('todos');
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -250,13 +257,15 @@ export default function Captacao() {
   };
 
   const dias = data?.periodo?.dias || 1;
-  const filtrando = filtroArea !== 'todas' || filtroTipo !== 'todos';
+  const filtrando =
+    filtroArea !== 'todas' || filtroTipo !== 'todos' || filtroDestino !== 'todos';
 
   const casaComFiltro = useCallback(
     (r) =>
       (filtroArea === 'todas' || r.area === filtroArea) &&
-      (filtroTipo === 'todos' || r.tipo === filtroTipo),
-    [filtroArea, filtroTipo]
+      (filtroTipo === 'todos' || r.tipo === filtroTipo) &&
+      (filtroDestino === 'todos' || r.destino === filtroDestino),
+    [filtroArea, filtroTipo, filtroDestino]
   );
 
   const anunciosFiltrados = useMemo(
@@ -279,6 +288,10 @@ export default function Captacao() {
   );
   const segmentosTipo = useMemo(
     () => segmentar(data?.anuncios || [], 'tipo', TIPOS),
+    [data]
+  );
+  const segmentosDestino = useMemo(
+    () => segmentar(data?.anuncios || [], 'destino', DESTINOS),
     [data]
   );
 
@@ -334,7 +347,14 @@ export default function Captacao() {
   const rotuloFiltro = [
     filtroArea !== 'todas' ? areaInfo(filtroArea).label : null,
     filtroTipo !== 'todos' ? tipoInfo(filtroTipo).label : null,
+    filtroDestino !== 'todos' ? destinoInfo(filtroDestino).label : null,
   ].filter(Boolean).join(' · ');
+
+  const limparFiltros = () => {
+    setFiltroArea('todas');
+    setFiltroTipo('todos');
+    setFiltroDestino('todos');
+  };
 
   const ordenarPor = (coluna) => {
     setOrdenacao((prev) =>
@@ -390,6 +410,24 @@ export default function Captacao() {
         >
           <span className="nav-dot" style={{ background: t.color }} />
           {t.curto}
+        </button>
+      ))}
+
+      <div className="nav-label" style={{ marginTop: 16 }}>Destino</div>
+      <button
+        className={`nav-item ${filtroDestino === 'todos' ? 'active' : ''}`}
+        onClick={() => setFiltroDestino('todos')}
+      >
+        Todos
+      </button>
+      {DESTINOS.filter((d) => segmentosDestino.some((s) => s.id === d.id)).map((d) => (
+        <button
+          key={d.id}
+          className={`nav-item ${filtroDestino === d.id ? 'active' : ''}`}
+          onClick={() => setFiltroDestino((v) => (v === d.id ? 'todos' : d.id))}
+        >
+          <span className="nav-dot" style={{ background: d.color }} />
+          {d.curto}
         </button>
       ))}
 
@@ -488,10 +526,14 @@ export default function Captacao() {
                 <span className="chip-x">×</span>
               </button>
             )}
-            <button
-              className="chip chip-limpar"
-              onClick={() => { setFiltroArea('todas'); setFiltroTipo('todos'); }}
-            >
+            {filtroDestino !== 'todos' && (
+              <button className="chip" onClick={() => setFiltroDestino('todos')}>
+                <span className="nav-dot" style={{ background: destinoInfo(filtroDestino).color }} />
+                {destinoInfo(filtroDestino).label}
+                <span className="chip-x">×</span>
+              </button>
+            )}
+            <button className="chip chip-limpar" onClick={limparFiltros}>
               limpar tudo
             </button>
           </div>
@@ -512,11 +554,14 @@ export default function Captacao() {
             </div>
           </div>
           <div className="card card-highlight">
-            <div className="card-label">Custo por resultado</div>
-            <div className="card-value accent">{loading ? '—' : brl(totais?.custo_por_resultado)}</div>
-            <div className="card-sub">
-              {inteiro(Math.round((totais?.resultados || 0) / dias))} resultados/dia em média
-            </div>
+            <div className="card-label">Custo por lead</div>
+            <div className="card-value accent">{loading ? '—' : brl(totais?.custo_por_lead)}</div>
+            <div className="card-sub">{inteiro(totais?.leads)} leads de formulário</div>
+          </div>
+          <div className="card card-highlight">
+            <div className="card-label">Custo por conversa</div>
+            <div className="card-value accent">{loading ? '—' : brl(totais?.custo_por_conversa)}</div>
+            <div className="card-sub">{inteiro(totais?.mensagens)} conversas iniciadas</div>
           </div>
           <div className="card">
             <div className="card-label">Impressões</div>
@@ -533,6 +578,10 @@ export default function Captacao() {
         </div>
 
         <div className="mini-grid">
+          <div className="mini">
+            <span className="mini-label">Custo por resultado</span>
+            <span className="mini-val">{loading ? '—' : brl(totais?.custo_por_resultado)}</span>
+          </div>
           <div className="mini">
             <span className="mini-label">CPM</span>
             <span className="mini-val">{loading ? '—' : brl(totais?.cpm)}</span>
@@ -560,53 +609,51 @@ export default function Captacao() {
           </div>
         )}
 
-        {/* Quebra por área e por tipo de captação */}
+        {/* Quebras por área, tipo de captação e destino */}
         {!loading && !error && segmentosArea.length > 0 && (
           <>
-            <div className="section-label">Por área</div>
-            <div className="seg-grid">
-              {segmentosArea.map((s) => (
-                <button
-                  key={s.id}
-                  className={`seg-card ${filtroArea === s.id ? 'active' : ''}`}
-                  style={{ '--c': s.color }}
-                  onClick={() => setFiltroArea((v) => (v === s.id ? 'todas' : s.id))}
-                >
-                  <div className="seg-nome">{s.label}</div>
-                  <div className="seg-valor">{brl(s.spend)}</div>
-                  <div className="seg-linha">
-                    <span>{inteiro(s.resultados)} resultados</span>
-                    <span className="seg-cpr">{brl(s.custo_por_resultado)}/result.</span>
-                  </div>
-                  <div className="seg-detalhe">
-                    {inteiro(s.leads)} leads · {inteiro(s.mensagens)} conversas ·{' '}
-                    {s.campanhas} {s.campanhas === 1 ? 'campanha' : 'campanhas'}
-                  </div>
-                </button>
-              ))}
-            </div>
+            {[
+              { titulo: 'Por área', segs: segmentosArea, ativo: filtroArea, set: setFiltroArea, vazio: 'todas' },
+              { titulo: 'Por tipo de captação', segs: segmentosTipo, ativo: filtroTipo, set: setFiltroTipo, vazio: 'todos' },
+              { titulo: 'Por destino do lead', segs: segmentosDestino, ativo: filtroDestino, set: setFiltroDestino, vazio: 'todos' },
+            ].map(({ titulo, segs, ativo, set, vazio }) => (
+              <div key={titulo}>
+                <div className="section-label">{titulo}</div>
+                <div className="seg-grid">
+                  {segs.map((s) => (
+                    <button
+                      key={s.id}
+                      className={`seg-card ${ativo === s.id ? 'active' : ''}`}
+                      style={{ '--c': s.color }}
+                      onClick={() => set((v) => (v === s.id ? vazio : s.id))}
+                    >
+                      <div className="seg-nome">{s.label}</div>
+                      <div className="seg-valor">{brl(s.spend)}</div>
+                      <div className="seg-custos">
+                        <div className="seg-custo">
+                          <span className="sc-label">{inteiro(s.leads)} leads</span>
+                          <span className="sc-val">{s.leads > 0 ? `${brl(s.custo_por_lead)}/lead` : '—'}</span>
+                        </div>
+                        <div className="seg-custo">
+                          <span className="sc-label">{inteiro(s.mensagens)} conversas</span>
+                          <span className="sc-val">{s.mensagens > 0 ? `${brl(s.custo_por_conversa)}/conversa` : '—'}</span>
+                        </div>
+                      </div>
+                      <div className="seg-detalhe">
+                        {inteiro(s.resultados)} resultados · {brl(s.custo_por_resultado)}/result. ·{' '}
+                        {s.campanhas} {s.campanhas === 1 ? 'campanha' : 'campanhas'}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
 
-            <div className="section-label">Por tipo de captação</div>
-            <div className="seg-grid">
-              {segmentosTipo.map((s) => (
-                <button
-                  key={s.id}
-                  className={`seg-card ${filtroTipo === s.id ? 'active' : ''}`}
-                  style={{ '--c': s.color }}
-                  onClick={() => setFiltroTipo((v) => (v === s.id ? 'todos' : s.id))}
-                >
-                  <div className="seg-nome">{s.label}</div>
-                  <div className="seg-valor">{brl(s.spend)}</div>
-                  <div className="seg-linha">
-                    <span>{inteiro(s.resultados)} resultados</span>
-                    <span className="seg-cpr">{brl(s.custo_por_resultado)}/result.</span>
-                  </div>
-                  <div className="seg-detalhe">
-                    {inteiro(s.leads)} leads · {inteiro(s.mensagens)} conversas ·{' '}
-                    {s.campanhas} {s.campanhas === 1 ? 'campanha' : 'campanhas'}
-                  </div>
-                </button>
-              ))}
+            <div className="nota-custos">
+              Custo por lead e custo por conversa dividem o mesmo investimento por
+              denominadores diferentes — a Meta não reparte o gasto entre os tipos de
+              resultado. Por isso os dois não somam o custo por resultado, igual ao
+              Gerenciador de Anúncios.
             </div>
           </>
         )}
@@ -860,26 +907,42 @@ export default function Captacao() {
             margin-bottom: 6px;
           }
           .seg-valor { font-size: 22px; font-weight: 700; color: var(--text); line-height: 1; }
-          .seg-linha {
+          .seg-custos {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            margin-top: 9px;
+            padding-top: 8px;
+            border-top: 1px solid var(--border);
+          }
+          .seg-custo {
             display: flex;
             justify-content: space-between;
             gap: 8px;
-            margin-top: 8px;
             font-size: 11px;
-            color: var(--text-sub);
             font-family: 'DM Mono', monospace;
           }
-          .seg-cpr { color: var(--c); }
+          .sc-label { color: var(--text-sub); }
+          .sc-val { color: var(--c); white-space: nowrap; }
           .seg-detalhe {
             font-size: 10px;
             color: var(--text-dim);
             font-family: 'DM Mono', monospace;
-            margin-top: 5px;
+            margin-top: 7px;
+          }
+
+          .nota-custos {
+            font-size: 11px;
+            color: var(--text-dim);
+            font-family: 'DM Mono', monospace;
+            line-height: 1.55;
+            margin: -12px 0 26px;
+            max-width: 760px;
           }
 
           .cards-grid {
             display: grid;
-            grid-template-columns: repeat(5, minmax(0, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
             gap: 12px;
             margin-bottom: 12px;
           }
@@ -889,7 +952,7 @@ export default function Captacao() {
 
           .mini-grid {
             display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 10px;
             margin-bottom: 28px;
           }
@@ -908,7 +971,7 @@ export default function Captacao() {
           .mini-val { font-size: 15px; font-weight: 700; color: var(--text); }
 
           .tabela-scroll { width: 100%; overflow-x: auto; }
-          .tabela { width: 100%; border-collapse: collapse; min-width: 900px; }
+          .tabela { width: 100%; border-collapse: collapse; min-width: 1180px; }
           .tabela th {
             font-size: 10px;
             letter-spacing: 0.08em;
@@ -980,12 +1043,10 @@ export default function Captacao() {
           .badge.neutro { color: var(--text-muted); background: var(--card-hover); border-color: var(--border); }
           .badge.erro { color: var(--danger); background: var(--danger-bg); border-color: var(--danger-border); }
 
-          @media (max-width: 1100px) and (min-width: 769px) {
-            .cards-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-          }
           @media (max-width: 768px) {
             .cards-grid { grid-template-columns: repeat(2, 1fr); }
             .mini-grid { grid-template-columns: repeat(2, 1fr); }
+            .seg-grid { grid-template-columns: 1fr; }
             .date-row { gap: 8px; }
           }
         `}</style>
