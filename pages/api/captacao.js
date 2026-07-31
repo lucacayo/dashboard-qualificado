@@ -69,17 +69,22 @@ export default async function handler(req, res) {
 
     // Cada linha diária herda a classificação da sua campanha, para que o
     // gráfico possa ser recortado pelos mesmos filtros da tabela.
+    /* Reaproveita classifyCampaign em vez de copiar campo a campo: assim
+       uma dimensão nova entra na série sozinha, sem precisar lembrar de
+       atualizar dois lugares. */
+    const SEM_CLASSIFICACAO = classifyCampaign(null, null);
+
     const porCampanha = new Map();
-    anuncios.forEach((a) => {
+    anunciosRaw.forEach((a) => {
       if (a.campaign_id && !porCampanha.has(a.campaign_id)) {
-        porCampanha.set(a.campaign_id, { area: a.area, tipo: a.tipo });
+        porCampanha.set(a.campaign_id, classifyCampaign(a.campaign_name, a.objective));
       }
     });
 
     const serie = diariasRaw
       .map((d) => ({
         ...d,
-        ...(porCampanha.get(d.campaign_id) || { area: 'outros', tipo: 'outros' }),
+        ...(porCampanha.get(d.campaign_id) || SEM_CLASSIFICACAO),
       }))
       .sort((a, b) => (a.dia < b.dia ? -1 : 1));
 
