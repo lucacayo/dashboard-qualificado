@@ -126,6 +126,10 @@ export default async function handler(req, res) {
     });
   } catch (e) {
     const status = e instanceof MetaError ? e.status : 500;
-    return res.status(status).json({ success: false, error: e.message });
+    return res.status(status).json({
+      success: false,
+      error: e.message,
+      ...(e.detalhe ? { detalhe: e.detalhe } : {}),
+    });
   }
 }
