@@ -218,14 +218,18 @@ export default function Captacao() {
       const res = await fetch(`/api/captacao?inicio=${ini}&fim=${end}`);
       const json = await res.json();
       if (myReq !== reqSeq.current) return;
-      if (!json.success) throw new Error(json.error || 'Erro desconhecido');
+      if (!json.success) {
+        const err = new Error(json.error || 'Erro desconhecido');
+        err.detalhe = json.detalhe || null;
+        throw err;
+      }
       setData(json);
       setLastUpdated(new Date().toLocaleTimeString('pt-BR', {
         timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit',
       }));
     } catch (e) {
       if (myReq !== reqSeq.current) return;
-      setError(e.message);
+      setError({ msg: e.message, detalhe: e.detalhe || null });
       setData(null);
     } finally {
       if (myReq === reqSeq.current) setLoading(false);
@@ -497,11 +501,40 @@ export default function Captacao() {
         {error && (
           <div className="erro-box">
             <div className="erro-titulo">Não foi possível carregar os dados da Meta</div>
-            <div className="erro-msg">{error}</div>
-            {error.includes('META_ACCESS_TOKEN') && (
+            <div className="erro-msg">{error.msg}</div>
+
+            {error.detalhe && (
+              <div className="erro-codigo">
+                {[
+                  error.detalhe.type,
+                  error.detalhe.code != null && `code ${error.detalhe.code}`,
+                  error.detalhe.subcode != null && `subcode ${error.detalhe.subcode}`,
+                  error.detalhe.trace && `trace ${error.detalhe.trace}`,
+                ].filter(Boolean).join(' · ')}
+              </div>
+            )}
+
+            {error.msg.includes('META_ACCESS_TOKEN') && (
               <div className="erro-dica">
                 Configure a variável de ambiente <code>META_ACCESS_TOKEN</code> (token com
                 permissão <code>ads_read</code> na conta) no projeto da Vercel e refaça o deploy.
+              </div>
+            )}
+
+            {/* code 190 é token; 200 e 10 são permissão/app. Separar os dois
+                evita mandar o usuário trocar um token que está bom. */}
+            {error.detalhe?.code === 190 && (
+              <div className="erro-dica">
+                O token expirou ou foi revogado. Gere um novo pelo usuário de sistema da
+                Business Manager e atualize <code>META_ACCESS_TOKEN</code> na Vercel.
+              </div>
+            )}
+            {(error.detalhe?.code === 200 || error.detalhe?.code === 10) && (
+              <div className="erro-dica">
+                O token continua válido — o que está bloqueado é o acesso do app à API.
+                Abra o app em developers.facebook.com e veja os alertas no painel: em
+                geral é verificação do negócio pendente ou uma restrição aplicada ao app.
+                A conta de anúncios em si não tem problema.
               </div>
             )}
           </div>
@@ -850,6 +883,12 @@ export default function Captacao() {
           }
           .erro-titulo { color: var(--danger); font-size: 13px; font-weight: 700; margin-bottom: 6px; }
           .erro-msg { color: var(--text-sub); font-size: 12px; font-family: 'DM Mono', monospace; }
+          .erro-codigo {
+            color: var(--text-dim);
+            font-size: 11px;
+            font-family: 'DM Mono', monospace;
+            margin-top: 5px;
+          }
           .erro-dica { color: var(--text-muted); font-size: 11px; margin-top: 10px; line-height: 1.5; }
           .erro-dica code {
             background: var(--card-bg);
